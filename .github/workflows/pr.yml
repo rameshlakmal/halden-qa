@@ -1,0 +1,108 @@
+name: Pull request
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: pr-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: 24
+
+jobs:
+  quality:
+    name: Lint, typecheck, assertion guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '${{ env.NODE_VERSION }}', cache: npm }
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - name: Assertion guard
+        if: github.event_name == 'pull_request'
+        run: npm run guard
+        env:
+          GUARD_BASE: origin/${{ github.base_ref }}
+
+  smoke:
+    name: Smoke tests against a local Halden
+    needs: quality
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env: { POSTGRES_USER: halden, POSTGRES_PASSWORD: halden, POSTGRES_DB: halden }
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U halden" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # The system under test, built from the shop repo (these are its settings, for a throwaway CI database).
+      DATABASE_URL: postgres://halden:halden@localhost:5432/halden
+      APP_URL: http://localhost:3001
+      ALLOWED_ORIGINS: http://localhost:3002
+      API_URL: http://127.0.0.1:4000
+      RATE_LIMITS: 'false'
+      SEED_ADMIN_PASSWORD: ci-admin-password-1
+      SEED_STAFF_PASSWORD: ci-staff-password-1
+      SEED_SHOPPER_PASSWORD: ci-shopper-password-1
+      HALDENPAY_WEBHOOK_SECRET: whsec_ci_only_not_a_real_secret
+      CRON_SECRET: ci-cron-secret-not-real
+      # The suite's settings, pointing at that local system.
+      SHOP_URL: http://localhost:3001
+      ADMIN_URL: http://localhost:3002
+      HALDEN_ADMIN_EMAIL: admin@halden.test
+      HALDEN_ADMIN_PASSWORD: ci-admin-password-1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: rameshlakmal/halden-outfitters
+          ref: main
+          path: sut
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '${{ env.NODE_VERSION }}'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            sut/package-lock.json
+      - name: Install the shop
+        working-directory: sut
+        run: npm ci
+      - name: Migrate and seed
+        working-directory: sut
+        run: npm run db:migrate && npm run db:seed
+      - name: Start the API, shop and admin
+        working-directory: sut
+        run: |
+          npm run build -w @halden/api
+          NODE_ENV=production nohup npm run start -w @halden/api > ../api.log 2>&1 &
+          npx --yes wait-on@9.5.1 -t 60000 http://127.0.0.1:4000/api/v1/health
+          npm run build -w @halden/web
+          npm run build -w @halden/admin
+          NODE_ENV=production nohup npm run start -w @halden/web > ../web.log 2>&1 &
+          NODE_ENV=production nohup npm run start -w @halden/admin > ../admin.log 2>&1 &
+          npx --yes wait-on@9.5.1 -t 90000 http://localhost:3001/ http://localhost:3002/sign-in
+      - name: Install the suite
+        run: npm ci && npx playwright install --with-deps chromium
+      - name: Smoke tests
+        run: npx playwright test --grep @smoke
+      - name: Server logs on failure
+        if: failure()
+        run: tail -n 100 api.log web.log admin.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: playwright-report
+          retention-days: 14

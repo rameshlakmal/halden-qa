@@ -1,0 +1,33 @@
+{
+  "name": "halden-qa",
+  "version": "0.1.0",
+  "private": true,
+  "description": "QA-owned Playwright suite for the Halden shop, API and admin",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "test": "playwright test",
+    "test:smoke": "playwright test --grep @smoke",
+    "test:api": "playwright test --project=api",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "guard": "tsx scripts/guard-assertions.ts",
+    "api:types": "tsx scripts/api-types.ts",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@faker-js/faker": "^10.6.0",
+    "@playwright/test": "^1.64.1",
+    "@types/node": "^24.0.0",
+    "dotenv": "^18.0.8",
+    "eslint": "^10.13.0",
+    "eslint-plugin-playwright": "^2.12.1",
+    "globals": "^17.13.0",
+    "tsx": "^4.23.15",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.71.2"
+  }
+}
