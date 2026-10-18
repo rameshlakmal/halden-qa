@@ -8,6 +8,7 @@
 import { test as base, expect, type APIRequestContext } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { ApiClient, ok, type Schemas } from '../api/client';
+import { cancelOpenOrders } from '../api/endpoints/orders';
 import { createShopper, type ShopperOptions } from '../api/endpoints/qa-lab';
 import { env } from '../env';
 import { DashboardPage } from '../pages/admin/dashboard.page';
@@ -62,7 +63,10 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   shopperOptions: [{}, { option: true }],
   shopper: async ({ api, adminApi, shopperOptions }, use) => {
     const made = await createShopper(adminApi, shopperOptions);
-    await use({ ...made, api: api.as(made.accessToken) });
+    const shopper = { ...made, api: api.as(made.accessToken) };
+    await use(shopper);
+    // Orders still open hold stock that every other test and shopper shares; cancelling gives it back.
+    await cancelOpenOrders(shopper.api);
   },
   signedIn: async ({ page, shopper }, use) => {
     // Through the shop's own /api/v1, so the session cookie is the shop's, exactly as after a real sign-in.
